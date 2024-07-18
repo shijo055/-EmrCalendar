@@ -1,0 +1,185 @@
+﻿@model IEnumerable<EmrCalendar.Models.Event>
+
+@{
+    ViewData["Title"] = "Calendar";
+
+    var events = (IEnumerable<EmrCalendar.Models.Event>)ViewData["events"];
+    var length = events.Count();
+}
+
+<table id="todoTable" style="display:none;">
+    @for (int i = 0; i < length; i++)
+    {
+        <tr>
+            <td>@Html.Encode(events.ElementAt(i).Id)</td>
+            <td>@Html.Encode(events.ElementAt(i).Title)</td>
+            <td>@Html.Encode(events.ElementAt(i).StartDate.ToString())</td>
+        </tr>
+    }
+</table>
+
+<div class="calendarContainer">
+    <div id="calendar"></div>
+</div>
+
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/fullcalendar@5.1.0/main.min.css">
+<script src="https://cdn.jsdelivr.net/npm/fullcalendar@5.1.0/main.min.js"></script>
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/sweetalert2@11/dist/sweetalert2.min.css">
+<script src="https://cdn.jsdelivr.net/npm/sweetalert2@11/dist/sweetalert2.all.min.js"></script>
+
+<script>
+    document.addEventListener('DOMContentLoaded', function () {
+        let eventsArr = loadData();
+        let calendar = initCalendar(eventsArr);
+
+        function loadData() {
+            let eventsArr = [];
+
+            let todoTable = document.getElementById("todoTable");
+            let trElem = todoTable.getElementsByTagName("tr");
+            for (let tr of trElem) {
+                let tdElems = tr.getElementsByTagName("td");
+                let eventObj = {
+                    id: tdElems[0].innerText,
+                    title: tdElems[1].innerText,
+                    start: tdElems[2].innerText,
+                }
+
+                eventsArr.push(eventObj);
+            }
+
+            return eventsArr;
+        }
+
+        function initCalendar(eventsArr) {
+            var calendarEl = document.getElementById('calendar');
+
+            let calendar = new FullCalendar.Calendar(calendarEl, {
+                initialView: 'dayGridMonth',
+                headerToolbar: {
+                    left: 'prev,next today',
+                    center: 'title',
+                    right: 'dayGridMonth,timeGridWeek,timeGridDay'
+                },
+                events: eventsArr,
+                selectable: true,
+                selectMirror: true,
+                editable: true,
+                droppable: true,
+                views: {
+                    timeGrid: {
+                        slotDuration: '00:15:00',
+                        slotLabelInterval: '01:00',
+                        allDaySlot: false
+                    }
+                },
+                select: function (arg) {
+                    // Check if selected time is between 10:00 AM to 8:00 PM
+                    const startTime = new Date(arg.start);
+                    const endTime = new Date(arg.end);
+                    const selectedTime = startTime.getHours();
+
+                    if (selectedTime < 10 || selectedTime >= 20) {
+                        calendar.unselect();
+                        Swal.fire({
+                            icon: 'error',
+                            title: 'Oops...',
+                            text: 'Appointments can only be created between 10:00 AM to 8:00 PM.',
+                            confirmButtonText: 'OK'
+                        });
+                        return;
+                    }
+
+                    // Show create/update dialog
+                    showAppointmentDialog('Create Appointment', arg.start, arg.end, null);
+                },
+                eventClick: function (info) {
+                    // Handle event click (for update or delete)
+                    const event = info.event;
+                    const start = event.start;
+                    const end = event.end;
+
+                    showAppointmentDialog('Update Appointment', start, end, event);
+                },
+                eventRender: function (info) {
+                    // Customize event rendering
+                    if (info.event.backgroundColor === '#7FFF00') {
+                        info.el.style.borderColor = '#7FFF00';
+                    }
+                }
+            });
+
+            calendar.render();
+
+            // Function to show appointment dialog (create or update)
+            function showAppointmentDialog(title, start, end, event) {
+                Swal.fire({
+                    title: 'Selected Time Range',
+                    html: `Start: ${start.toLocaleString()}<br>End: ${end.toLocaleString()}`,
+                    icon: 'info',
+                    showCancelButton: true,
+                    showCloseButton: true,
+                    confirmButtonText: 'OK',
+                    cancelButtonText: 'Cancel',
+                    customClass: {
+                        confirmButton: 'btn btn-primary mr-2',
+                        cancelButton: 'btn btn-danger'
+                    }
+                }).then((result) => {
+                    if (result.isConfirmed) {
+                        const doctorId = $('#DoctorId').val();
+                        const doctorname = $('#selectedDoctorName').val();
+                        const specialityId = $('#SpecialityId').val();
+                        const speciality = $('#selectedSpeciality').val();
+
+                        const formattedStartDateTime = start.toLocaleTimeString();
+                        const formattedEndDateTime = end.toLocaleTimeString();
+
+                        const action = (title === 'Create Appointment') ? 'ScheduleAdd' : 'ScheduleUpdate';
+                        const appointmentId = (event) ? event.id : null;
+
+                        // Prepare appointment details
+                        let appointmentdet = {
+                            PatientId: $('#patientid').val(),
+                            _AppointmentDate: start.toISOString(),
+                            BookingFromTime: formattedStartDateTime,
+                            BookingToTime: formattedEndDateTime,
+                            DepartmentId: specialityId,
+                            DoctorId: doctorId
+                        };
+
+                        let url = `../Patient/${action}`;
+                        if (action === 'ScheduleUpdate') {
+                            appointmentdet.AppointmentId = appointmentId;
+                        }
+
+                        // Make AJAX request to create or update appointment
+                        $.post(url, appointmentdet).done(({ status, message }) => {
+                            if (status) {
+                                // Appointment created or updated successfully
+                                Swal.fire({
+                                    title: '',
+                                    text: message,
+                                    icon: 'success',
+                                    confirmButtonColor: '#3085d6',
+                                    confirmButtonText: 'OK'
+                                }).then(() => {
+                                    calendar.refetchEvents();
+                                });
+                            } else {
+                                // Error in appointment creation or update
+                                Swal.fire({
+                                    title: '',
+                                    text: message,
+                                    icon: 'error',
+                                    confirmButtonColor: '#3085d6',
+                                    confirmButtonText: 'OK'
+                                });
+                            }
+                        });
+                    }
+                });
+            }
+        }
+
+</script>
